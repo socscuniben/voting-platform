@@ -138,62 +138,95 @@ public entry fun deregister_voter(
     election.voters.remove(&voter_address);
 }
 
-//election created event
+    // Get voter status
+    public fun get_voter_status(election: &Election, voter_address: address): bool {
+        if (vec_map::contains(&election.voters, &voter_address)) {
+            *vec_map::get(&election.voters, &voter_address)
+        } else {
+            false
+        }
+    }
 
-//Candidate registered event
+    // Get current results
+    public fun get_results(election: &Election): (vector<address>, vector<u64>, u64) {
+        let addresses = election.candidate_addresses;
+        let mut votes = vector::empty<u64>();
+        
+        let len = addresses.length();
+        let mut i = 0;
+        while (i < len) {
+            let addr = *addresses.borrow(i);
+            let vote_count = *vec_map::get(&election.vote_counts, &addr);
+            votes.push_back(vote_count);
+            i = i + 1;
+        };
+        
+        (addresses, votes, election.total_votes)
+    }
 
-//Vote casted event
+    // Get winner
+    public fun get_winner(election: &Election): option::Option<address> {
+        election.winner
+    }
 
-//Voter registered event 
+    // Get all candidates
+    public fun get_all_candidates(election: &Election): vector<address> {
+        election.candidate_addresses
+    }
 
-//election ended event
+    // Check if voter is registered
+    public fun is_voter_registered(election: &Election, voter_address: address): bool {
+        vec_map::contains(&election.voters, &voter_address)
+    }
 
-//election started event
+    // ==================== ADDITIONAL FUNCTIONS ====================
 
+    // Extend election time
+    #[allow(lint(public_entry))]
+    public entry fun extend_election_time(
+        election: &mut Election,
+        _admin_cap: &ElectionAdminCap,
+        new_end_time: u64,
+        _ctx: &mut TxContext
+    ) {
+        assert!(!election.is_ended, EElectionEnded);
+        assert!(new_end_time > election.end_time, EInvalidTime);
+        
+        election.end_time = new_end_time;
+    }
 
+    // Remove candidate (before election starts)
+    #[allow(lint(public_entry))]
+    public entry fun remove_candidate(
+        election: &mut Election,
+        _admin_cap: &ElectionAdminCap,
+        candidate_address: address,
+        _ctx: &mut TxContext
+    ) {
+        assert!(!election.is_active, EElectionAlreadyStarted);
+        assert!(vec_map::contains(&election.candidate_info, &candidate_address), ECandidateNotFound);
+        
+        vec_map::remove(&mut election.candidate_info, &candidate_address);
+        vec_map::remove(&mut election.vote_counts, &candidate_address);
+        
+        // Remove from candidate_addresses vector
+        let (found, index) = election.candidate_addresses.index_of(&candidate_address);
+        if (found) {
+            election.candidate_addresses.remove(index);
+        };
+    }
 
-
-// create_election() function
-
-// register_candidate() function
-
-// register_voter() function
-
-// cast_vote() function
-
-//end_election() function
-
-//start_election() function
-
-//Helper functions
-
-
-//calculate_results() function
-
-//get_election() function
-
-//get_candidate() function
-
-//get_voter() function
-
-//get_all_voters_for_a_candidate() function
-
-//get_all_voters_for_an_election() function
-
-//get_election_results() functionn
-
-//delete_candidate() / remove_candidate()
-
-
-
-//deregister_voter()
-
-
-//withdraw_vote() (optional)
-
-
-//extend_election_time()
-
-
-//pause_election() (optional)
-
+    // Deregister voter (before voting)
+    #[allow(lint(public_entry))]
+    public entry fun deregister_voter(
+        election: &mut Election,
+        voter_address: address,
+        _ctx: &mut TxContext
+    ) {
+        assert!(vec_map::contains(&election.voters, &voter_address), EVoterNotRegistered);
+        let has_voted = *vec_map::get(&election.voters, &voter_address);
+        assert!(!has_voted, EAlreadyVoted);
+        
+        vec_map::remove(&mut election.voters, &voter_address);
+    }
+}
