@@ -18,9 +18,9 @@ public struct Election has key {
     end_time: u64,
     is_active: bool,
     is_ended: bool,
-    condidate_addresses: vector<address>,
+    candidate_addresses: vector<address>,
     candidate_info: VecMap<address, Candidateinfo>,
-    vote_counts: VecMap<address, bool>,
+    vote_counts: VecMap<address, u64>,
     voters: VecMap<address, bool>,
     total_votes: u64, 
     winner: Option<address>
@@ -100,6 +100,35 @@ public struct CandidatePass has key, store {
     pfp: String,
 }
 
+// -------------------- Events --------------------
+public struct EventElectionCreated has copy, store {
+    election_id: u64,
+    name: String,
+    creator: address,
+}
+
+public struct EventVoterRegistered has copy, store {
+    election_id: u64,
+    voter: address,
+}
+
+public struct EventCandidateRegistered has copy, store {
+    election_id: u64,
+    candidate: address,
+}
+
+public struct EventVoteCast has copy, store {
+    election_id: u64,
+    voter: address,
+    candidate: address,
+}
+
+public struct EventElectionEnded has copy, store {
+    election_id: u64,
+    winner: Option<address>,
+    total_votes: u64,
+}
+
 // Register a new voter for an election
 public entry fun register_voter(
     _admin_cap: &ElectionAdminCap,
@@ -125,6 +154,8 @@ public entry fun register_voter(
     };
 
     transfer::transfer(vote_pass, voter_address)
+    // Emit voter-registered event
+    event::emit_event(ctx, EventVoterRegistered { election_id: election_id_u64, voter: voter_address });
 }
 
 // Remove a voter from an election
@@ -228,5 +259,81 @@ public entry fun deregister_voter(
         assert!(!has_voted, EAlreadyVoted);
         
         vec_map::remove(&mut election.voters, &voter_address);
+    }
+
+        // Register a new candidate for an election
+        #[allow(lint(public_entry))]
+        public entry fun register_candidate(
+            _admin_cap: &ElectionAdminCap,
+            election: &mut Election,
+            candidate_address: address,
+            name: String,
+            description: String,
+            pfp: String,
+            ctx: &mut TxContext
+        ) {
+            assert!(!vec_map::contains(&election.candidate_info, &candidate_address), EAlreadyRegistered);
+
+            let info = Candidateinfo { name, description, pfp };
+            election.candidate_info.insert(candidate_address, info);
+            election.candidate_addresses.push_back(candidate_address);
+            election.vote_counts.insert(candidate_address, 0u64);
+
+            let election_id_obj = object::id(election);
+            let election_addr = object::id_to_address(&election_id_obj);
+            let election_id_u64 = (address::to_u256(election_addr) as u64);
+
+            event::emit_event(ctx, EventCandidateRegistered { election_id: election_id_u64, candidate: candidate_address });
+        }
+
+        // Cast a vote for a candidate
+        #[allow(lint(public_entry))]
+        public entry fun cast_vote(
+            voter_address: address,
+            election: &mut Election,
+            candidate_address: address,
+            ctx: &mut TxContext
+        ) {
+            assert!(election.is_active, EVoterNotFound);
+            assert!(vec_map::contains(&election.voters, &voter_address), EVoterNotFound);
+            let has_voted = *vec_map::get(&election.voters, &voter_address);
+            assert!(!has_voted, EAlreadyRegistered);
+
+            // mark voter as voted
+            vec_map::insert(&mut election.voters, voter_address, true);
+
+            // increment candidate vote count
+            let mut current = 0u64;
+            if (vec_map::contains(&election.vote_counts, &candidate_address)) {
+                current = *vec_map::get(&election.vote_counts, &candidate_address);
+            }
+            let new = current + 1u64;
+            vec_map::insert(&mut election.vote_counts, candidate_address, new);
+            election.total_votes = election.total_votes + 1u64;
+
+            let election_id_obj = object::id(election);
+            let election_addr = object::id_to_address(&election_id_obj);
+            let election_id_u64 = (address::to_u256(election_addr) as u64);
+
+            event::emit_event(ctx, EventVoteCast { election_id: election_id_u64, voter: voter_address, candidate: candidate_address });
+        }
+
+    // Helper: Get candidate info (if present)
+    public fun get_candidate_info(election: &Election, candidate_address: address): option::Option<Candidateinfo> {
+        if (vec_map::contains(&election.candidate_info, &candidate_address)) {
+            let info_ref = vec_map::get(&election.candidate_info, &candidate_address);
+            option::some(*info_ref)
+        } else {
+            option::none()
+        }
+    }
+
+    // Helper: Get vote count for a specific candidate
+    public fun get_vote_count(election: &Election, candidate_address: address): u64 {
+        if (vec_map::contains(&election.vote_counts, &candidate_address)) {
+            *vec_map::get(&election.vote_counts, &candidate_address)
+        } else {
+            0
+        }
     }
 }
